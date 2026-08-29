@@ -124,6 +124,9 @@ export default function App() {
 
   useEffect(() => {
     if (!supportsSpeech) return;
+    // Triggers Chrome's async voice-list loading early so the first
+    // "Ergebnis vorlesen" click isn't the one that kicks it off.
+    window.speechSynthesis.getVoices();
     return () => window.speechSynthesis.cancel();
   }, []);
 
@@ -166,11 +169,14 @@ export default function App() {
 
   function handleToggleSpeech() {
     if (!supportsSpeech || !result) return;
-    window.speechSynthesis.cancel();
     if (speaking) {
+      window.speechSynthesis.cancel();
       setSpeaking(false);
       return;
     }
+    // Calling cancel() right before speak() makes Chrome silently drop the
+    // new utterance (well-known bug), so only cancel above when actually
+    // stopping playback - never as a "just in case" reset before speaking.
     const utterance = new SpeechSynthesisUtterance(buildSpeechText(result, risk?.label));
     utterance.lang = 'de-DE';
     utterance.onend = () => setSpeaking(false);
