@@ -12,8 +12,10 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Square,
   TriangleAlert,
   UtensilsCrossed,
+  Volume2,
   X,
   Zap,
 } from 'lucide-react';
@@ -71,6 +73,18 @@ const TRUST_ITEMS = [
 
 const KNOWN_CATEGORIES = ['Haushalt', 'Technik', 'Garten', 'Pflanzen', 'Handwerk', 'Kochen'];
 
+const supportsSpeech = typeof window !== 'undefined' && 'speechSynthesis' in window;
+
+function buildSpeechText(result, riskLabel) {
+  const parts = [result.title, result.summary];
+  if (riskLabel) parts.push(riskLabel);
+  if (result.tips?.length) {
+    parts.push('So gehst du vor:');
+    result.tips.forEach((tip, index) => parts.push(`${index + 1}. ${tip}`));
+  }
+  return parts.filter(Boolean).join('. ');
+}
+
 async function analyzePhoto({ base64, mimeType }) {
   const response = await fetch('/api/analyze', {
     method: 'POST',
@@ -104,8 +118,14 @@ export default function App() {
   const [photo, setPhoto] = useState(null); // { base64, mimeType, previewUrl }
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [speaking, setSpeaking] = useState(false);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!supportsSpeech) return;
+    return () => window.speechSynthesis.cancel();
+  }, []);
 
   async function handleFileSelected(event) {
     const file = event.target.files?.[0];
@@ -136,10 +156,27 @@ export default function App() {
   }
 
   function handleReset() {
+    if (supportsSpeech) window.speechSynthesis.cancel();
+    setSpeaking(false);
     setPhoto(null);
     setResult(null);
     setErrorMessage('');
     setStatus('idle');
+  }
+
+  function handleToggleSpeech() {
+    if (!supportsSpeech || !result) return;
+    window.speechSynthesis.cancel();
+    if (speaking) {
+      setSpeaking(false);
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(buildSpeechText(result, risk?.label));
+    utterance.lang = 'de-DE';
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+    setSpeaking(true);
   }
 
   const risk = result ? RISK_STYLES[result.riskLevel] || RISK_STYLES.gering : null;
@@ -325,6 +362,21 @@ export default function App() {
             )}
             <div className="p-5 sm:p-6 flex flex-col gap-5">
               <p className="text-slate-600 leading-relaxed">{result.summary}</p>
+
+              {supportsSpeech && (
+                <button
+                  onClick={handleToggleSpeech}
+                  aria-pressed={speaking}
+                  className={`w-full flex items-center justify-center gap-2 font-semibold py-3 rounded-2xl border-2 transition-colors ${
+                    speaking
+                      ? 'bg-brand border-brand text-white'
+                      : 'border-brand/25 text-brand hover:bg-brand-50'
+                  }`}
+                >
+                  {speaking ? <Square size={15} fill="currentColor" /> : <Volume2 size={18} />}
+                  {speaking ? 'Vorlesen stoppen' : 'Ergebnis vorlesen'}
+                </button>
+              )}
 
               {risk && (
                 <div className={`flex items-start gap-3 border rounded-2xl p-4 ${risk.className}`}>
