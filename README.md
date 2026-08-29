@@ -1,5 +1,7 @@
 # Blitzdiagnose
 
+**Aktuelle Version: 0.1.2**
+
 Foto machen, KI analysiert es und gibt konkrete Tipps – ohne Kategorie-Vorwahl,
 ohne Login.
 
@@ -58,7 +60,7 @@ Benötigte Umgebungsvariable im Vercel-Projekt:
 |-------------------|----------------------------------------------------|
 | `GEMINI_API_KEY`  | Server-seitiger Key für `api/analyze.js`           |
 
-## Bekannte Einschränkungen (Stand v0.1.0)
+## Bekannte Einschränkungen
 
 - **Kein persistentes Rate-Limiting.** `api/analyze.js` bremst Missbrauch nur
   best-effort pro warmer Vercel-Instanz (In-Memory-Zähler, 12 Anfragen/Minute

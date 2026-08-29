@@ -450,6 +450,7 @@ export default function App() {
         <p className="text-center text-[11px] text-slate-400 leading-relaxed px-4 mt-1">
           KI-generierte Einschätzung ohne Gewähr – ersetzt keine fachliche Beratung.
         </p>
+        <p className="text-center text-[10px] text-slate-300">Blitzdiagnose v{__APP_VERSION__}</p>
       </main>
     </div>
   );
