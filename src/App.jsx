@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Camera, ImageUp, Loader2, RotateCcw, ShieldAlert, TriangleAlert, Zap } from 'lucide-react';
+import { Camera, ImageUp, Loader2, Plus, RotateCcw, ShieldAlert, TriangleAlert, X, Zap } from 'lucide-react';
 import { compressImage } from './imageCompress.js';
 
 const RISK_STYLES = {
@@ -8,11 +8,18 @@ const RISK_STYLES = {
   gefahr: { label: 'Fachperson hinzuziehen', className: 'bg-red-50 text-red-800 border-red-200' },
 };
 
-async function analyzePhoto({ base64, mimeType }) {
+// Begrenzung passend zu Vercels hartem Payload-Limit für Serverless
+// Functions (siehe api/analyze.js) - mehr Fotos würden trotz clientseitiger
+// Kompression riskant nah an dieses Limit kommen.
+const MAX_PHOTOS = 4;
+
+async function analyzePhotos(photos) {
   const response = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: base64, mimeType }),
+    body: JSON.stringify({
+      images: photos.map(({ base64, mimeType }) => ({ image: base64, mimeType })),
+    }),
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
@@ -23,19 +30,21 @@ async function analyzePhoto({ base64, mimeType }) {
 
 export default function App() {
   const [status, setStatus] = useState('idle'); // idle | preview | loading | result | error
-  const [photo, setPhoto] = useState(null); // { base64, mimeType, previewUrl }
+  const [photos, setPhotos] = useState([]); // [{ base64, mimeType, previewUrl }]
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
 
-  async function handleFileSelected(event) {
-    const file = event.target.files?.[0];
+  async function handleFilesSelected(event) {
+    const files = Array.from(event.target.files || []);
     event.target.value = '';
-    if (!file) return;
+    if (!files.length) return;
+    const filesToAdd = files.slice(0, Math.max(0, MAX_PHOTOS - photos.length));
+    if (!filesToAdd.length) return;
     try {
-      const compressed = await compressImage(file);
-      setPhoto(compressed);
+      const compressed = await Promise.all(filesToAdd.map(compressImage));
+      setPhotos((prev) => [...prev, ...compressed]);
       setResult(null);
       setStatus('preview');
     } catch (error) {
@@ -44,11 +53,19 @@ export default function App() {
     }
   }
 
+  function handleRemovePhoto(index) {
+    setPhotos((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length === 0) setStatus('idle');
+      return next;
+    });
+  }
+
   async function handleAnalyze() {
-    if (!photo) return;
+    if (!photos.length) return;
     setStatus('loading');
     try {
-      const data = await analyzePhoto(photo);
+      const data = await analyzePhotos(photos);
       setResult(data);
       setStatus('result');
     } catch (error) {
@@ -58,7 +75,7 @@ export default function App() {
   }
 
   function handleReset() {
-    setPhoto(null);
+    setPhotos([]);
     setResult(null);
     setErrorMessage('');
     setStatus('idle');
@@ -85,14 +102,15 @@ export default function App() {
           accept="image/*"
           capture="environment"
           className="hidden"
-          onChange={handleFileSelected}
+          onChange={handleFilesSelected}
         />
         <input
           ref={galleryInputRef}
           type="file"
           accept="image/*"
+          multiple
           className="hidden"
-          onChange={handleFileSelected}
+          onChange={handleFilesSelected}
         />
 
         {status === 'idle' && (
@@ -118,23 +136,54 @@ export default function App() {
           </div>
         )}
 
-        {status === 'preview' && photo && (
+        {status === 'preview' && photos.length > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <img src={photo.previewUrl} alt="Ausgewähltes Foto" className="w-full max-h-96 object-cover" />
-            <div className="p-4 flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-2 p-3">
+              {photos.map((p, index) => (
+                <div key={index} className="relative rounded-xl overflow-hidden border border-slate-200">
+                  <img src={p.previewUrl} alt={`Foto ${index + 1}`} className="w-full h-32 object-cover" />
+                  <button
+                    onClick={() => handleRemovePhoto(index)}
+                    aria-label="Foto entfernen"
+                    className="absolute top-1.5 right-1.5 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 transition-colors"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="px-4 pb-4 flex flex-col gap-3">
+              {photos.length < MAX_PHOTOS && (
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="flex-1 flex items-center justify-center gap-2 border border-slate-300 text-slate-700 font-medium py-2.5 rounded-xl hover:bg-slate-50 transition-colors"
+                  >
+                    <Plus size={16} />
+                    Foto
+                  </button>
+                  <button
+                    onClick={() => galleryInputRef.current?.click()}
+                    className="flex-1 flex items-center justify-center gap-2 border border-slate-300 text-slate-700 font-medium py-2.5 rounded-xl hover:bg-slate-50 transition-colors"
+                  >
+                    <ImageUp size={16} />
+                    Auswählen
+                  </button>
+                </div>
+              )}
               <button
                 onClick={handleAnalyze}
                 className="w-full flex items-center justify-center gap-2 bg-brand hover:bg-brand-dark text-white font-semibold py-4 rounded-xl transition-colors"
               >
                 <Zap size={20} />
-                Analysieren
+                Analysieren{photos.length > 1 ? ` (${photos.length} Fotos)` : ''}
               </button>
               <button
                 onClick={handleReset}
                 className="w-full flex items-center justify-center gap-2 text-slate-600 font-medium py-2 hover:text-slate-900 transition-colors"
               >
                 <RotateCcw size={16} />
-                Anderes Foto
+                Alle verwerfen
               </button>
             </div>
           </div>
@@ -149,8 +198,21 @@ export default function App() {
 
         {status === 'result' && result && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            {photo?.previewUrl && (
-              <img src={photo.previewUrl} alt="Analysiertes Foto" className="w-full max-h-64 object-cover" />
+            {photos.length > 0 && (
+              photos.length === 1 ? (
+                <img src={photos[0].previewUrl} alt="Analysiertes Foto" className="w-full max-h-64 object-cover" />
+              ) : (
+                <div className="grid grid-cols-2 gap-1 p-1">
+                  {photos.map((p, index) => (
+                    <img
+                      key={index}
+                      src={p.previewUrl}
+                      alt={`Analysiertes Foto ${index + 1}`}
+                      className="w-full h-32 object-cover rounded-lg"
+                    />
+                  ))}
+                </div>
+              )
             )}
             <div className="p-5 flex flex-col gap-4">
               <div>

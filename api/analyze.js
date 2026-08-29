@@ -11,17 +11,25 @@
 // 0-3s bei gleichbleibend guter Qualität.
 const MODEL_NAME = 'gemini-flash-lite-latest';
 
+// Muss zum Client-Limit in src/App.jsx (MAX_PHOTOS) passen.
+const MAX_IMAGES = 4;
+
 // Ohne diese Angabe gilt Vercels Default-Timeout von 10s, das für einen
 // Gemini-Vision-Aufruf knapp werden kann (siehe api/gemini.js im
 // Hauptprojekt).
 export const config = { maxDuration: 30 };
 
-const SYSTEM_PROMPT = `Du bist ein hilfsbereiter Alltags-Experte, der ein Foto eines beliebigen
-Problems oder Gegenstands sieht (Haushalt, Technik, Garten, Handwerk,
-Pflanzen/Tiere, Kochen, uvm.) und dem Nutzer in Sekunden weiterhilft.
+const SYSTEM_PROMPT = `Du bist ein hilfsbereiter Alltags-Experte, der ein oder mehrere Fotos eines
+beliebigen Problems oder Gegenstands siehst (Haushalt, Technik, Garten,
+Handwerk, Pflanzen/Tiere, Kochen, uvm.) und dem Nutzer in Sekunden
+weiterhilft.
 
-Erkenne selbstständig, worum es auf dem Foto geht - der Nutzer wählt keine
-Kategorie vor. Beschreibe kurz, was zu sehen ist und welches Problem
+Bekommst du mehrere Fotos, gehe davon aus, dass sie zusammengehören (z.B.
+verschiedene Blickwinkel oder Nahaufnahmen desselben Problems) und beziehe
+alle Fotos gemeinsam in deine Einschätzung ein.
+
+Erkenne selbstständig, worum es auf dem/den Foto(s) geht - der Nutzer wählt
+keine Kategorie vor. Beschreibe kurz, was zu sehen ist und welches Problem
 erkennbar ist, und gib 3-6 konkrete, direkt umsetzbare Tipps zur Lösung.
 
 Bei allem, das eine Gefahr darstellen könnte (Strom, Gas, Statik/Einsturz,
@@ -93,17 +101,28 @@ export default async function handler(req, res) {
       return;
     }
 
-    const { image, mimeType } = req.body || {};
-    if (!image || typeof image !== 'string' || !mimeType) {
-      res.status(400).json({ error: 'image (base64) und mimeType erforderlich' });
+    const { images } = req.body || {};
+    if (!Array.isArray(images) || images.length === 0) {
+      res.status(400).json({ error: 'images (Array aus { image, mimeType }) erforderlich' });
+      return;
+    }
+    if (images.length > MAX_IMAGES) {
+      res.status(400).json({ error: `Maximal ${MAX_IMAGES} Fotos pro Analyse.` });
+      return;
+    }
+    const invalid = images.some((img) => !img || typeof img.image !== 'string' || !img.mimeType);
+    if (invalid) {
+      res.status(400).json({ error: 'Jedes Bild braucht image (base64) und mimeType' });
       return;
     }
     // Grobe Absicherung gegen zu große Payloads, bevor Vercels hartes
     // 4,5MB-Limit als kryptisches FUNCTION_PAYLOAD_TOO_LARGE durchschlägt
     // (siehe README im Hauptprojekt zum selben Problem bei unkomprimierten
     // Handyfotos) - der Client komprimiert bereits vorab (src/imageCompress.js).
-    if (image.length > 6_000_000) {
-      res.status(413).json({ error: 'Bild zu groß, bitte erneut versuchen.' });
+    // Grenze gilt für die Summe aller Fotos einer Analyse.
+    const totalImageChars = images.reduce((sum, img) => sum + img.image.length, 0);
+    if (totalImageChars > 6_000_000) {
+      res.status(413).json({ error: 'Fotos zusammen zu groß, bitte weniger/kleinere Fotos verwenden.' });
       return;
     }
 
@@ -120,8 +139,13 @@ export default async function handler(req, res) {
         {
           role: 'user',
           parts: [
-            { text: 'Analysiere dieses Foto und gib eine Einschätzung mit konkreten Tipps.' },
-            { inlineData: { mimeType, data: image } },
+            {
+              text:
+                images.length > 1
+                  ? `Analysiere diese ${images.length} zusammengehörigen Fotos und gib eine Einschätzung mit konkreten Tipps.`
+                  : 'Analysiere dieses Foto und gib eine Einschätzung mit konkreten Tipps.',
+            },
+            ...images.map((img) => ({ inlineData: { mimeType: img.mimeType, data: img.image } })),
           ],
         },
       ],

@@ -1,15 +1,17 @@
 # Blitzdiagnose
 
-Foto machen, KI analysiert es und gibt konkrete Tipps – ohne Kategorie-Vorwahl,
-ohne Login.
+Foto(s) machen, KI analysiert sie und gibt konkrete Tipps – ohne
+Kategorie-Vorwahl, ohne Login.
 
 ## Idee
 
-Foto von einem beliebigen Alltagsproblem (Haushalt, Technik, Garten,
-Handwerk, Pflanzen/Tiere, Kochen, uvm.) aufnehmen, die KI erkennt selbst,
-worum es geht, und gibt in Sekunden eine Einschätzung mit 3-6 konkreten
-Tipps zur Lösung – inklusive Risiko-Hinweis, wenn Vorsicht geboten ist
-(z.B. Strom, Gas, Gesundheit).
+Ein oder mehrere Fotos (bis zu 4) von einem beliebigen Alltagsproblem
+(Haushalt, Technik, Garten, Handwerk, Pflanzen/Tiere, Kochen, uvm.)
+aufnehmen, die KI erkennt selbst, worum es geht, und gibt in Sekunden eine
+Einschätzung mit 3-6 konkreten Tipps zur Lösung – inklusive Risiko-Hinweis,
+wenn Vorsicht geboten ist (z.B. Strom, Gas, Gesundheit). Mehrere Fotos sind
+z.B. für unterschiedliche Blickwinkel oder Nahaufnahmen desselben Problems
+gedacht.
 
 Ursprünglich als Ableger von [Sm@rtCraft](https://github.com/SchludeMarco/smartcraft-v2)
 entstanden (gleiches Grundprinzip: Foto → KI-Diagnose → Tipps), aber bewusst
