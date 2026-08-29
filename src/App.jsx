@@ -121,6 +121,10 @@ export default function App() {
   const [speaking, setSpeaking] = useState(false);
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
+  // Keeps the SpeechSynthesisUtterance alive for the duration of playback -
+  // without an external reference some browsers (notably Safari) garbage
+  // collect it mid-flight and speech silently never starts.
+  const utteranceRef = useRef(null);
 
   useEffect(() => {
     if (!supportsSpeech) return;
@@ -181,6 +185,13 @@ export default function App() {
     utterance.lang = 'de-DE';
     utterance.onend = () => setSpeaking(false);
     utterance.onerror = () => setSpeaking(false);
+    // Keep a strong reference so the browser can't garbage-collect the
+    // utterance before it finishes speaking (see note on utteranceRef above).
+    utteranceRef.current = utterance;
+    // Defensive reset for browsers/devices that leave speechSynthesis stuck
+    // "paused" (e.g. after the tab was backgrounded) - resume() is a no-op
+    // otherwise.
+    window.speechSynthesis.resume();
     window.speechSynthesis.speak(utterance);
     setSpeaking(true);
   }
