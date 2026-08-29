@@ -85,6 +85,24 @@ function buildSpeechText(result, riskLabel) {
   return parts.filter(Boolean).join('. ');
 }
 
+// Codes documented at https://developer.mozilla.org/docs/Web/API/SpeechSynthesisErrorEvent/error
+const SPEECH_ERROR_HINTS = {
+  'synthesis-failed':
+    'Das ist meist ein vorübergehender Fehler der Sprachausgabe deines Geräts (bekanntes Android-Problem). ' +
+    'Prüfe im Play Store auf Updates für "Sprachausgabe von Google" bzw. deine Sprachausgabe-App und versuch es erneut.',
+  'synthesis-unavailable': 'Auf diesem Gerät ist gerade keine Sprachausgabe-Engine verfügbar.',
+  'language-unavailable':
+    'Für Deutsch ist keine Stimme installiert. Lade sie unter Android-Einstellungen → Bedienungshilfen → ' +
+    'Text-in-Sprache-Ausgabe nach.',
+  'voice-unavailable': 'Die gewählte Stimme ist auf diesem Gerät nicht verfügbar.',
+  'not-allowed': 'Die Sprachausgabe wurde vom Browser blockiert.',
+};
+
+// A handful of Android/Chrome combinations fail the first speak() attempt
+// with a transient error and succeed right after - worth one silent retry
+// before bothering the user with it.
+const RETRYABLE_SPEECH_ERRORS = new Set(['synthesis-failed', 'synthesis-unavailable']);
+
 async function analyzePhoto({ base64, mimeType }) {
   const response = await fetch('/api/analyze', {
     method: 'POST',
@@ -126,6 +144,9 @@ export default function App() {
   // without an external reference some browsers (notably Safari) garbage
   // collect it mid-flight and speech silently never starts.
   const utteranceRef = useRef(null);
+  // Guards the delayed retry below from restarting speech after the user
+  // has already pressed "stop" during the retry's brief delay.
+  const stopRequestedRef = useRef(false);
 
   useEffect(() => {
     if (!supportsSpeech) return;
@@ -164,6 +185,7 @@ export default function App() {
   }
 
   function handleReset() {
+    stopRequestedRef.current = true;
     if (supportsSpeech) window.speechSynthesis.cancel();
     setSpeaking(false);
     setSpeechError('');
@@ -176,40 +198,62 @@ export default function App() {
   function handleToggleSpeech() {
     if (!supportsSpeech || !result) return;
     if (speaking) {
+      stopRequestedRef.current = true;
       window.speechSynthesis.cancel();
       setSpeaking(false);
       return;
     }
+    stopRequestedRef.current = false;
     setSpeechError('');
+    const voices = window.speechSynthesis.getVoices();
     // Chrome on Android silently produces no sound (no error either) when
     // the device has no text-to-speech voice/engine installed - surfacing
     // that here at least tells the user where to look instead of a dead
-    // button, and gives us the real error code (event.error) if one fires.
-    if (supportsSpeech && window.speechSynthesis.getVoices().length === 0) {
+    // button.
+    if (voices.length === 0) {
       setSpeechError(
         'Keine Sprachausgabe auf diesem Gerät gefunden. Prüfe unter Android in den Einstellungen ' +
           'unter "Bedienungshilfen" oder "Sprache & Eingabe" → "Text-in-Sprache-Ausgabe", ob eine ' +
           'Engine mit deutscher Stimme installiert ist.'
       );
     }
+    // Passing an explicit voice object (rather than leaving the browser to
+    // resolve "de-DE" itself) sidesteps a class of Android-Chrome failures
+    // where letting the engine pick the voice triggers "synthesis-failed".
+    const germanVoice = voices.find((v) => v.lang === 'de-DE') || voices.find((v) => v.lang?.startsWith('de'));
+    const text = buildSpeechText(result, risk?.label);
+
+    const speakOnce = (isRetry) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = germanVoice?.lang || 'de-DE';
+      if (germanVoice) utterance.voice = germanVoice;
+      utterance.onend = () => setSpeaking(false);
+      utterance.onerror = (event) => {
+        if (!isRetry && RETRYABLE_SPEECH_ERRORS.has(event.error)) {
+          window.speechSynthesis.cancel();
+          setTimeout(() => {
+            if (!stopRequestedRef.current) speakOnce(true);
+          }, 300);
+          return;
+        }
+        setSpeaking(false);
+        const hint = SPEECH_ERROR_HINTS[event.error];
+        setSpeechError(`Sprachausgabe fehlgeschlagen (${event.error || 'unbekannter Fehler'}).${hint ? ` ${hint}` : ''}`);
+      };
+      // Keep a strong reference so the browser can't garbage-collect the
+      // utterance before it finishes speaking (see note on utteranceRef above).
+      utteranceRef.current = utterance;
+      // Defensive reset for browsers/devices that leave speechSynthesis stuck
+      // "paused" (e.g. after the tab was backgrounded) - resume() is a no-op
+      // otherwise.
+      window.speechSynthesis.resume();
+      window.speechSynthesis.speak(utterance);
+    };
+
     // Calling cancel() right before speak() makes Chrome silently drop the
     // new utterance (well-known bug), so only cancel above when actually
     // stopping playback - never as a "just in case" reset before speaking.
-    const utterance = new SpeechSynthesisUtterance(buildSpeechText(result, risk?.label));
-    utterance.lang = 'de-DE';
-    utterance.onend = () => setSpeaking(false);
-    utterance.onerror = (event) => {
-      setSpeaking(false);
-      setSpeechError(`Sprachausgabe fehlgeschlagen (${event.error || 'unbekannter Fehler'}).`);
-    };
-    // Keep a strong reference so the browser can't garbage-collect the
-    // utterance before it finishes speaking (see note on utteranceRef above).
-    utteranceRef.current = utterance;
-    // Defensive reset for browsers/devices that leave speechSynthesis stuck
-    // "paused" (e.g. after the tab was backgrounded) - resume() is a no-op
-    // otherwise.
-    window.speechSynthesis.resume();
-    window.speechSynthesis.speak(utterance);
+    speakOnce(false);
     setSpeaking(true);
   }
 
