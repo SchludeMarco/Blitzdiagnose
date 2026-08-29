@@ -119,6 +119,7 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [speaking, setSpeaking] = useState(false);
+  const [speechError, setSpeechError] = useState('');
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
   // Keeps the SpeechSynthesisUtterance alive for the duration of playback -
@@ -165,6 +166,7 @@ export default function App() {
   function handleReset() {
     if (supportsSpeech) window.speechSynthesis.cancel();
     setSpeaking(false);
+    setSpeechError('');
     setPhoto(null);
     setResult(null);
     setErrorMessage('');
@@ -178,13 +180,28 @@ export default function App() {
       setSpeaking(false);
       return;
     }
+    setSpeechError('');
+    // Chrome on Android silently produces no sound (no error either) when
+    // the device has no text-to-speech voice/engine installed - surfacing
+    // that here at least tells the user where to look instead of a dead
+    // button, and gives us the real error code (event.error) if one fires.
+    if (supportsSpeech && window.speechSynthesis.getVoices().length === 0) {
+      setSpeechError(
+        'Keine Sprachausgabe auf diesem Gerät gefunden. Prüfe unter Android in den Einstellungen ' +
+          'unter "Bedienungshilfen" oder "Sprache & Eingabe" → "Text-in-Sprache-Ausgabe", ob eine ' +
+          'Engine mit deutscher Stimme installiert ist.'
+      );
+    }
     // Calling cancel() right before speak() makes Chrome silently drop the
     // new utterance (well-known bug), so only cancel above when actually
     // stopping playback - never as a "just in case" reset before speaking.
     const utterance = new SpeechSynthesisUtterance(buildSpeechText(result, risk?.label));
     utterance.lang = 'de-DE';
     utterance.onend = () => setSpeaking(false);
-    utterance.onerror = () => setSpeaking(false);
+    utterance.onerror = (event) => {
+      setSpeaking(false);
+      setSpeechError(`Sprachausgabe fehlgeschlagen (${event.error || 'unbekannter Fehler'}).`);
+    };
     // Keep a strong reference so the browser can't garbage-collect the
     // utterance before it finishes speaking (see note on utteranceRef above).
     utteranceRef.current = utterance;
@@ -393,6 +410,12 @@ export default function App() {
                   {speaking ? <Square size={15} fill="currentColor" /> : <Volume2 size={18} />}
                   {speaking ? 'Vorlesen stoppen' : 'Ergebnis vorlesen'}
                 </button>
+              )}
+
+              {speechError && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-relaxed -mt-2">
+                  {speechError}
+                </p>
               )}
 
               {risk && (
