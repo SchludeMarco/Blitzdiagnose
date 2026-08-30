@@ -88,8 +88,9 @@ function buildSpeechText(result, riskLabel) {
 // Codes documented at https://developer.mozilla.org/docs/Web/API/SpeechSynthesisErrorEvent/error
 const SPEECH_ERROR_HINTS = {
   'synthesis-failed':
-    'Das ist meist ein vorübergehender Fehler der Sprachausgabe deines Geräts (bekanntes Android-Problem). ' +
-    'Prüfe im Play Store auf Updates für "Sprachausgabe von Google" bzw. deine Sprachausgabe-App und versuch es erneut.',
+    'Bekannter Android-Chrome-Bug: die Sprachausgabe des Geräts selbst funktioniert (prüfbar unter ' +
+    'Einstellungen → Bedienungshilfen → Text-in-Sprache-Ausgabe → Testen), aber Chrome kann sie manchmal ' +
+    'nicht ansprechen. Tippe den Button einfach nochmal an - oft klappt ein zweiter, eigenständiger Versuch.',
   'synthesis-unavailable': 'Auf diesem Gerät ist gerade keine Sprachausgabe-Engine verfügbar.',
   'language-unavailable':
     'Für Deutsch ist keine Stimme installiert. Lade sie unter Android-Einstellungen → Bedienungshilfen → ' +
@@ -99,8 +100,8 @@ const SPEECH_ERROR_HINTS = {
 };
 
 // A handful of Android/Chrome combinations fail the first speak() attempt
-// with a transient error and succeed right after - worth one silent retry
-// before bothering the user with it.
+// with a transient error and succeed right after - worth one immediate
+// retry before bothering the user with it.
 const RETRYABLE_SPEECH_ERRORS = new Set(['synthesis-failed', 'synthesis-unavailable']);
 
 async function analyzePhoto({ base64, mimeType }) {
@@ -217,23 +218,16 @@ export default function App() {
           'Engine mit deutscher Stimme installiert ist.'
       );
     }
-    // Passing an explicit voice object (rather than leaving the browser to
-    // resolve "de-DE" itself) sidesteps a class of Android-Chrome failures
-    // where letting the engine pick the voice triggers "synthesis-failed".
-    const germanVoice = voices.find((v) => v.lang === 'de-DE') || voices.find((v) => v.lang?.startsWith('de'));
     const text = buildSpeechText(result, risk?.label);
 
     const speakOnce = (isRetry) => {
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = germanVoice?.lang || 'de-DE';
-      if (germanVoice) utterance.voice = germanVoice;
+      utterance.lang = 'de-DE';
       utterance.onend = () => setSpeaking(false);
       utterance.onerror = (event) => {
-        if (!isRetry && RETRYABLE_SPEECH_ERRORS.has(event.error)) {
+        if (!isRetry && RETRYABLE_SPEECH_ERRORS.has(event.error) && !stopRequestedRef.current) {
           window.speechSynthesis.cancel();
-          setTimeout(() => {
-            if (!stopRequestedRef.current) speakOnce(true);
-          }, 300);
+          speakOnce(true);
           return;
         }
         setSpeaking(false);
@@ -243,10 +237,6 @@ export default function App() {
       // Keep a strong reference so the browser can't garbage-collect the
       // utterance before it finishes speaking (see note on utteranceRef above).
       utteranceRef.current = utterance;
-      // Defensive reset for browsers/devices that leave speechSynthesis stuck
-      // "paused" (e.g. after the tab was backgrounded) - resume() is a no-op
-      // otherwise.
-      window.speechSynthesis.resume();
       window.speechSynthesis.speak(utterance);
     };
 
