@@ -115,12 +115,13 @@ const SPEECH_ERROR_HINTS = {
 // before bothering the user with it.
 const RETRYABLE_SPEECH_ERRORS = new Set(['synthesis-failed', 'synthesis-unavailable']);
 
-async function analyzePhotos(photos) {
+async function analyzePhotos(photos, comment) {
   const response = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       images: photos.map(({ base64, mimeType }) => ({ image: base64, mimeType })),
+      comment: comment?.trim() || undefined,
     }),
   });
   const data = await response.json().catch(() => null);
@@ -159,6 +160,7 @@ function LoadingStatus() {
 export default function App() {
   const [status, setStatus] = useState('idle'); // idle | preview | loading | result | error
   const [photos, setPhotos] = useState([]); // [{ id, base64, mimeType, previewUrl }]
+  const [comment, setComment] = useState('');
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [speaking, setSpeaking] = useState(false);
@@ -211,7 +213,7 @@ export default function App() {
     if (photos.length === 0) return;
     setStatus('loading');
     try {
-      const data = await analyzePhotos(photos);
+      const data = await analyzePhotos(photos, comment);
       setResult(data);
       setStatus('result');
     } catch (error) {
@@ -226,6 +228,7 @@ export default function App() {
     setSpeaking(false);
     setSpeechError('');
     setPhotos([]);
+    setComment('');
     setResult(null);
     setErrorMessage('');
     setStatus('idle');
@@ -438,8 +441,16 @@ export default function App() {
                   </button>
                 )}
               </div>
+              <textarea
+                value={comment}
+                onChange={(event) => setComment(event.target.value.slice(0, 500))}
+                placeholder="Noch etwas dazu? z.B. seit wann das Problem besteht oder was du schon versucht hast (optional)"
+                rows={2}
+                maxLength={500}
+                className="mt-4 w-full resize-none rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-brand/40 transition-colors"
+              />
             </div>
-            <div className="p-5 flex flex-col gap-3">
+            <div className="p-5 pt-1 flex flex-col gap-3">
               <button
                 onClick={handleAnalyze}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-brand to-brand-light hover:brightness-105 text-white font-semibold py-4 rounded-2xl shadow-lg shadow-brand/30 transition-all hover:-translate-y-0.5 active:translate-y-0"
