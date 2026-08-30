@@ -111,7 +111,18 @@ async function analyzePhoto({ base64, mimeType }) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.error || 'Analyse fehlgeschlagen.');
+    // Eine leere/nicht-JSON-Antwort (data === null) bedeutet meist, dass die
+    // Anfrage nie unseren Handler erreicht hat oder verlassen hat, bevor er
+    // antworten konnte (z.B. Plattform-Timeout) - dafür eine konkretere
+    // Meldung als den generischen Fallback.
+    if (!data) {
+      throw new Error(
+        response.status === 504
+          ? 'Die Analyse hat zu lange gedauert. Bitte versuche es erneut.'
+          : 'Analyse fehlgeschlagen. Bitte versuche es erneut.'
+      );
+    }
+    throw new Error(data.error || 'Analyse fehlgeschlagen.');
   }
   return data;
 }

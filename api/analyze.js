@@ -131,17 +131,33 @@ export default async function handler(req, res) {
       },
     };
 
+    // Eigenes Timeout unterhalb von config.maxDuration (30s): so bekommt der
+    // Client immer eine echte JSON-Fehlerantwort von uns statt Vercels
+    // hartem Funktions-Timeout, dessen Antwort kein JSON ist und im Frontend
+    // (response.json()) scheitert - das äußert sich dort als generisches
+    // "Analyse fehlgeschlagen." ohne echte Fehlermeldung.
+    const upstreamController = new AbortController();
+    const upstreamTimeout = setTimeout(() => upstreamController.abort(), 25_000);
+
     let upstream;
     try {
       upstream = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: upstreamController.signal,
       });
     } catch (error) {
+      if (error?.name === 'AbortError') {
+        console.error('Gemini-Aufruf hat das 25s-Timeout überschritten.');
+        res.status(504).json({ error: 'Die Analyse hat zu lange gedauert. Bitte versuche es erneut.' });
+        return;
+      }
       console.error('Upstream-Gemini-Aufruf fehlgeschlagen:', error);
       res.status(502).json({ error: 'Upstream Gemini request failed' });
       return;
+    } finally {
+      clearTimeout(upstreamTimeout);
     }
 
     const upstreamJson = await upstream.json().catch(() => null);
