@@ -60,10 +60,22 @@ function categoryIcon(category) {
 }
 
 const LOADING_STEPS = [
-  'Foto wird hochgeladen …',
+  'Foto(s) werden hochgeladen …',
   'KI untersucht die Details …',
   'Passende Tipps werden formuliert …',
 ];
+
+// Grenze bewusst niedrig gehalten: jedes komprimierte Foto ist idealerweise
+// unter ~500KB (siehe imageCompress.js), aber Vercels hartes 4,5MB-
+// Payload-Limit für die gesamte Anfrage bleibt der eigentliche Deckel (siehe
+// Größen-Check in api/analyze.js).
+const MAX_PHOTOS = 5;
+
+function makePhotoId() {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 const TRUST_ITEMS = [
   { icon: Lock, label: 'Kein Login' },
@@ -103,11 +115,14 @@ const SPEECH_ERROR_HINTS = {
 // before bothering the user with it.
 const RETRYABLE_SPEECH_ERRORS = new Set(['synthesis-failed', 'synthesis-unavailable']);
 
-async function analyzePhoto({ base64, mimeType }) {
+async function analyzePhotos(photos, comment) {
   const response = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: base64, mimeType }),
+    body: JSON.stringify({
+      images: photos.map(({ base64, mimeType }) => ({ image: base64, mimeType })),
+      comment: comment?.trim() || undefined,
+    }),
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
@@ -144,7 +159,8 @@ function LoadingStatus() {
 
 export default function App() {
   const [status, setStatus] = useState('idle'); // idle | preview | loading | result | error
-  const [photo, setPhoto] = useState(null); // { base64, mimeType, previewUrl }
+  const [photos, setPhotos] = useState([]); // [{ id, base64, mimeType, previewUrl }]
+  const [comment, setComment] = useState('');
   const [result, setResult] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [speaking, setSpeaking] = useState(false);
@@ -168,12 +184,17 @@ export default function App() {
   }, []);
 
   async function handleFileSelected(event) {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
     event.target.value = '';
-    if (!file) return;
+    if (files.length === 0) return;
+    const filesToAdd = files.slice(0, Math.max(0, MAX_PHOTOS - photos.length));
+    if (filesToAdd.length === 0) return;
     try {
-      const compressed = await compressImage(file);
-      setPhoto(compressed);
+      const compressed = await Promise.all(filesToAdd.map(compressImage));
+      setPhotos((current) => [
+        ...current,
+        ...compressed.map((photo) => ({ ...photo, id: makePhotoId() })),
+      ]);
       setResult(null);
       setStatus('preview');
     } catch (error) {
@@ -182,11 +203,17 @@ export default function App() {
     }
   }
 
+  function handleRemovePhoto(id) {
+    const next = photos.filter((photo) => photo.id !== id);
+    setPhotos(next);
+    if (next.length === 0) setStatus('idle');
+  }
+
   async function handleAnalyze() {
-    if (!photo) return;
+    if (photos.length === 0) return;
     setStatus('loading');
     try {
-      const data = await analyzePhoto(photo);
+      const data = await analyzePhotos(photos, comment);
       setResult(data);
       setStatus('result');
     } catch (error) {
@@ -200,7 +227,8 @@ export default function App() {
     if (supportsSpeech) window.speechSynthesis.cancel();
     setSpeaking(false);
     setSpeechError('');
-    setPhoto(null);
+    setPhotos([]);
+    setComment('');
     setResult(null);
     setErrorMessage('');
     setStatus('idle');
@@ -306,6 +334,7 @@ export default function App() {
           ref={galleryInputRef}
           type="file"
           accept="image/*"
+          multiple
           className="hidden"
           onChange={handleFileSelected}
         />
@@ -346,6 +375,9 @@ export default function App() {
                 <ImageUp size={18} />
                 Aus Galerie wählen
               </button>
+              <p className="text-xs text-slate-400 mt-4">
+                Auch mehrere Fotos möglich – z.B. für verschiedene Blickwinkel oder Details.
+              </p>
             </div>
 
             <div className="animate-fade-up flex flex-col gap-3" style={{ animationDelay: '80ms' }}>
@@ -378,23 +410,47 @@ export default function App() {
           </>
         )}
 
-        {status === 'preview' && photo && (
+        {status === 'preview' && photos.length > 0 && (
           <div className="animate-fade-up bg-white rounded-[2rem] shadow-xl shadow-slate-200/70 border border-slate-100 overflow-hidden">
-            <div className="relative">
-              <img src={photo.previewUrl} alt="Ausgewähltes Foto" className="w-full max-h-96 object-cover" />
-              <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/60 to-transparent" />
-              <button
-                onClick={handleReset}
-                aria-label="Foto verwerfen"
-                className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/40 backdrop-blur text-white flex items-center justify-center hover:bg-black/60 transition-colors"
-              >
-                <X size={18} />
-              </button>
-              <p className="absolute bottom-3 left-4 text-white text-sm font-semibold drop-shadow">
-                Bereit zur Analyse
+            <div className="p-5 pb-1">
+              <p className="text-sm font-semibold text-slate-500 mb-3">
+                {photos.length} {photos.length === 1 ? 'Foto' : 'Fotos'} bereit zur Analyse
+                {photos.length < MAX_PHOTOS && ` · bis zu ${MAX_PHOTOS} möglich`}
               </p>
+              <div className="grid grid-cols-3 gap-2">
+                {photos.map((item) => (
+                  <div key={item.id} className="relative aspect-square rounded-xl overflow-hidden bg-slate-100">
+                    <img src={item.previewUrl} alt="Ausgewähltes Foto" className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => handleRemovePhoto(item.id)}
+                      aria-label="Foto entfernen"
+                      className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/50 backdrop-blur text-white flex items-center justify-center hover:bg-black/70 transition-colors"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+                {photos.length < MAX_PHOTOS && (
+                  <button
+                    onClick={() => galleryInputRef.current?.click()}
+                    aria-label="Weiteres Foto hinzufügen"
+                    className="aspect-square rounded-xl border-2 border-dashed border-slate-200 text-slate-400 flex flex-col items-center justify-center gap-1 hover:border-brand/40 hover:text-brand transition-colors"
+                  >
+                    <ImageUp size={20} />
+                    <span className="text-[11px] font-medium">Hinzufügen</span>
+                  </button>
+                )}
+              </div>
+              <textarea
+                value={comment}
+                onChange={(event) => setComment(event.target.value.slice(0, 500))}
+                placeholder="Noch etwas dazu? z.B. seit wann das Problem besteht oder was du schon versucht hast (optional)"
+                rows={2}
+                maxLength={500}
+                className="mt-4 w-full resize-none rounded-2xl border-2 border-slate-200 px-4 py-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-brand/40 transition-colors"
+              />
             </div>
-            <div className="p-5 flex flex-col gap-3">
+            <div className="p-5 pt-1 flex flex-col gap-3">
               <button
                 onClick={handleAnalyze}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-brand to-brand-light hover:brightness-105 text-white font-semibold py-4 rounded-2xl shadow-lg shadow-brand/30 transition-all hover:-translate-y-0.5 active:translate-y-0"
@@ -402,12 +458,21 @@ export default function App() {
                 <Sparkles size={20} />
                 Analysieren
               </button>
+              {photos.length < MAX_PHOTOS && (
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 border-2 border-slate-200 text-slate-700 font-semibold py-3 rounded-2xl hover:border-brand/40 hover:bg-brand-50 transition-colors"
+                >
+                  <Camera size={16} />
+                  Weiteres Foto aufnehmen
+                </button>
+              )}
               <button
                 onClick={handleReset}
                 className="w-full flex items-center justify-center gap-2 text-slate-500 font-medium py-2 hover:text-slate-900 transition-colors"
               >
                 <RotateCcw size={16} />
-                Anderes Foto
+                Alle verwerfen
               </button>
             </div>
           </div>
@@ -436,14 +501,19 @@ export default function App() {
 
         {status === 'result' && result && (
           <div className="animate-fade-up bg-white rounded-[2rem] shadow-xl shadow-slate-200/70 border border-slate-100 overflow-hidden">
-            {photo?.previewUrl && (
+            {photos[0]?.previewUrl && (
               <div className="relative">
-                <img src={photo.previewUrl} alt="Analysiertes Foto" className="w-full h-60 object-cover" />
+                <img src={photos[0].previewUrl} alt="Analysiertes Foto" className="w-full h-60 object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent" />
                 <span className="absolute top-3 left-3 flex items-center gap-1.5 bg-white/90 backdrop-blur text-brand-dark text-xs font-bold uppercase tracking-wide px-3 py-1.5 rounded-full shadow-sm">
                   <CategoryIcon size={13} />
                   {result.category}
                 </span>
+                {photos.length > 1 && (
+                  <span className="absolute top-3 right-3 bg-white/90 backdrop-blur text-brand-dark text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">
+                    +{photos.length - 1} weitere
+                  </span>
+                )}
                 <h2 className="absolute bottom-0 inset-x-0 p-4 font-display text-xl font-extrabold text-white leading-tight drop-shadow-sm">
                   {result.title}
                 </h2>
