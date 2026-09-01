@@ -113,6 +113,17 @@ function buildShareText(result, riskLabel) {
   return lines.join('\n');
 }
 
+// Rebuilds the compressed photos (kept as base64 in state, see imageCompress.js)
+// into File objects so they can be attached to a Web Share payload.
+function filesFromPhotos(photos) {
+  return photos.map((photo, index) => {
+    const byteString = atob(photo.base64);
+    const bytes = new Uint8Array(byteString.length);
+    for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i);
+    return new File([bytes], `blitzdiagnose-foto-${index + 1}.jpg`, { type: photo.mimeType });
+  });
+}
+
 // Codes documented at https://developer.mozilla.org/docs/Web/API/SpeechSynthesisErrorEvent/error
 const SPEECH_ERROR_HINTS = {
   'synthesis-failed':
@@ -319,8 +330,20 @@ export default function App() {
     setShareError('');
     const text = buildShareText(result, risk?.label);
     if (supportsShare) {
+      const shareData = { title: result.title, text };
+      // Best-effort: attach the analyzed photo(s) when the platform supports
+      // sharing files. canShare() can throw on some browsers for unsupported
+      // input rather than just returning false, hence the try/catch.
+      if (photos.length > 0 && typeof navigator.canShare === 'function') {
+        try {
+          const files = filesFromPhotos(photos);
+          if (navigator.canShare({ files })) shareData.files = files;
+        } catch {
+          // Ignore - falls back to sharing text only.
+        }
+      }
       try {
-        await navigator.share({ title: result.title, text });
+        await navigator.share(shareData);
       } catch (error) {
         // AbortError = user cancelled the native share sheet - not an error.
         if (error?.name !== 'AbortError') {
