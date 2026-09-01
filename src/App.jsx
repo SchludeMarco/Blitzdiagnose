@@ -6,9 +6,11 @@ import {
   Home,
   ImageUp,
   Leaf,
+  Check,
   Lock,
   PawPrint,
   RotateCcw,
+  Share2,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -86,6 +88,9 @@ const TRUST_ITEMS = [
 const KNOWN_CATEGORIES = ['Haushalt', 'Technik', 'Garten', 'Pflanzen', 'Handwerk', 'Kochen'];
 
 const supportsSpeech = typeof window !== 'undefined' && 'speechSynthesis' in window;
+const supportsShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+const supportsClipboard =
+  typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function';
 
 function buildSpeechText(result, riskLabel) {
   const parts = [result.title, result.summary];
@@ -95,6 +100,17 @@ function buildSpeechText(result, riskLabel) {
     result.tips.forEach((tip, index) => parts.push(`${index + 1}. ${tip}`));
   }
   return parts.filter(Boolean).join('. ');
+}
+
+function buildShareText(result, riskLabel) {
+  const lines = [result.title, '', result.summary];
+  if (riskLabel) lines.push('', `⚠️ ${riskLabel}`);
+  if (result.tips?.length) {
+    lines.push('', 'So gehst du vor:');
+    result.tips.forEach((tip, index) => lines.push(`${index + 1}. ${tip}`));
+  }
+  lines.push('', 'Erstellt mit Blitzdiagnose ⚡');
+  return lines.join('\n');
 }
 
 // Codes documented at https://developer.mozilla.org/docs/Web/API/SpeechSynthesisErrorEvent/error
@@ -165,6 +181,8 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [speaking, setSpeaking] = useState(false);
   const [speechError, setSpeechError] = useState('');
+  const [shareCopied, setShareCopied] = useState(false);
+  const [shareError, setShareError] = useState('');
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
   // Keeps the SpeechSynthesisUtterance alive for the duration of playback -
@@ -294,6 +312,32 @@ export default function App() {
     // stopping playback - never as a "just in case" reset before speaking.
     speakOnce(false);
     setSpeaking(true);
+  }
+
+  async function handleShare() {
+    if (!result) return;
+    setShareError('');
+    const text = buildShareText(result, risk?.label);
+    if (supportsShare) {
+      try {
+        await navigator.share({ title: result.title, text });
+      } catch (error) {
+        // AbortError = user cancelled the native share sheet - not an error.
+        if (error?.name !== 'AbortError') {
+          setShareError('Teilen fehlgeschlagen.');
+        }
+      }
+      return;
+    }
+    if (supportsClipboard) {
+      try {
+        await navigator.clipboard.writeText(text);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2000);
+      } catch {
+        setShareError('Kopieren fehlgeschlagen.');
+      }
+    }
   }
 
   const risk = result ? RISK_STYLES[result.riskLevel] || RISK_STYLES.gering : null;
@@ -540,6 +584,22 @@ export default function App() {
               {speechError && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-relaxed -mt-2">
                   {speechError}
+                </p>
+              )}
+
+              {(supportsShare || supportsClipboard) && (
+                <button
+                  onClick={handleShare}
+                  className="w-full flex items-center justify-center gap-2 font-semibold py-3 rounded-2xl border-2 border-brand/25 text-brand hover:bg-brand-50 transition-colors"
+                >
+                  {shareCopied ? <Check size={18} /> : <Share2 size={18} />}
+                  {shareCopied ? 'In Zwischenablage kopiert' : supportsShare ? 'Ergebnis teilen' : 'Ergebnis kopieren'}
+                </button>
+              )}
+
+              {shareError && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-relaxed -mt-2">
+                  {shareError}
                 </p>
               )}
 
