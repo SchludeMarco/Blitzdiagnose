@@ -192,7 +192,7 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [speaking, setSpeaking] = useState(false);
   const [speechError, setSpeechError] = useState('');
-  const [shareCopied, setShareCopied] = useState(false);
+  const [shareNotice, setShareNotice] = useState('');
   const [shareError, setShareError] = useState('');
   const cameraInputRef = useRef(null);
   const galleryInputRef = useRef(null);
@@ -256,6 +256,8 @@ export default function App() {
     if (supportsSpeech) window.speechSynthesis.cancel();
     setSpeaking(false);
     setSpeechError('');
+    setShareNotice('');
+    setShareError('');
     setPhotos([]);
     setComment('');
     setResult(null);
@@ -328,22 +330,34 @@ export default function App() {
   async function handleShare() {
     if (!result) return;
     setShareError('');
+    setShareNotice('');
     const text = buildShareText(result, risk?.label);
     if (supportsShare) {
-      const shareData = { title: result.title, text };
       // Best-effort: attach the analyzed photo(s) when the platform supports
       // sharing files. canShare() can throw on some browsers for unsupported
       // input rather than just returning false, hence the try/catch.
+      let files = [];
       if (photos.length > 0 && typeof navigator.canShare === 'function') {
         try {
-          const files = filesFromPhotos(photos);
-          if (navigator.canShare({ files })) shareData.files = files;
+          const candidateFiles = filesFromPhotos(photos);
+          if (navigator.canShare({ files: candidateFiles })) files = candidateFiles;
         } catch {
           // Ignore - falls back to sharing text only.
         }
       }
+      // WhatsApp und einige andere Apps verwerfen angehängte Fotos
+      // stillschweigend, sobald zusätzlich ein längerer `text` mitgegeben
+      // wird - Fotos separat (ohne Text) zu teilen ist deutlich
+      // zuverlässiger als beides in einem Aufruf zu kombinieren.
+      const shareData = files.length > 0 ? { title: result.title, files } : { title: result.title, text };
       try {
         await navigator.share(shareData);
+        if (files.length > 0 && supportsClipboard) {
+          // Tipp-Text steht damit für eine Folgenachricht bereit, ohne den
+          // Foto-Share selbst zu stören.
+          await navigator.clipboard.writeText(text).catch(() => {});
+          setShareNotice('Fotos geteilt – Beschreibung & Tipps zusätzlich in die Zwischenablage kopiert.');
+        }
       } catch (error) {
         // AbortError = user cancelled the native share sheet - not an error.
         if (error?.name !== 'AbortError') {
@@ -355,8 +369,7 @@ export default function App() {
     if (supportsClipboard) {
       try {
         await navigator.clipboard.writeText(text);
-        setShareCopied(true);
-        setTimeout(() => setShareCopied(false), 2000);
+        setShareNotice('In Zwischenablage kopiert.');
       } catch {
         setShareError('Kopieren fehlgeschlagen.');
       }
@@ -615,9 +628,16 @@ export default function App() {
                   onClick={handleShare}
                   className="w-full flex items-center justify-center gap-2 font-semibold py-3 rounded-2xl border-2 border-brand/25 text-brand hover:bg-brand-50 transition-colors"
                 >
-                  {shareCopied ? <Check size={18} /> : <Share2 size={18} />}
-                  {shareCopied ? 'In Zwischenablage kopiert' : supportsShare ? 'Ergebnis teilen' : 'Ergebnis kopieren'}
+                  <Share2 size={18} />
+                  {supportsShare ? 'Ergebnis teilen' : 'Ergebnis kopieren'}
                 </button>
+              )}
+
+              {shareNotice && (
+                <p className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2 leading-relaxed -mt-2">
+                  <Check size={14} className="shrink-0" />
+                  {shareNotice}
+                </p>
               )}
 
               {shareError && (
