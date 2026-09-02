@@ -345,23 +345,42 @@ export default function App() {
           // Ignore - falls back to sharing text only.
         }
       }
+      if (files.length === 0) {
+        try {
+          await navigator.share({ title: result.title, text });
+        } catch (error) {
+          if (error?.name !== 'AbortError') setShareError('Teilen fehlgeschlagen.');
+        }
+        return;
+      }
       // WhatsApp und einige andere Apps verwerfen angehängte Fotos
       // stillschweigend, sobald zusätzlich ein längerer `text` mitgegeben
-      // wird - Fotos separat (ohne Text) zu teilen ist deutlich
-      // zuverlässiger als beides in einem Aufruf zu kombinieren.
-      const shareData = files.length > 0 ? { title: result.title, files } : { title: result.title, text };
+      // wird - deshalb zwei getrennte native Share-Dialoge statt einem
+      // kombinierten Aufruf: erst die Fotos, direkt danach die Beschreibung
+      // als eigene (zweite) Nachricht.
       try {
-        await navigator.share(shareData);
-        if (files.length > 0 && supportsClipboard) {
-          // Tipp-Text steht damit für eine Folgenachricht bereit, ohne den
-          // Foto-Share selbst zu stören.
-          await navigator.clipboard.writeText(text).catch(() => {});
-          setShareNotice('Fotos geteilt – Beschreibung & Tipps zusätzlich in die Zwischenablage kopiert.');
-        }
+        await navigator.share({ title: result.title, files });
       } catch (error) {
-        // AbortError = user cancelled the native share sheet - not an error.
-        if (error?.name !== 'AbortError') {
-          setShareError('Teilen fehlgeschlagen.');
+        if (error?.name !== 'AbortError') setShareError('Teilen fehlgeschlagen.');
+        return;
+      }
+      try {
+        await navigator.share({ title: result.title, text });
+        return;
+      } catch (error) {
+        // Nutzer hat den zweiten Dialog bewusst abgebrochen - nichts weiter tun.
+        if (error?.name === 'AbortError') return;
+        // Zweiter Share-Dialog aus anderem Grund nicht möglich (z.B. manche
+        // Browser lassen nach dem ersten Share keinen zweiten Aufruf mehr
+        // zu) - Text wenigstens in die Zwischenablage legen, damit er nicht
+        // verloren geht.
+      }
+      if (supportsClipboard) {
+        try {
+          await navigator.clipboard.writeText(text);
+          setShareNotice('Fotos geteilt – Beschreibung & Tipps zusätzlich in die Zwischenablage kopiert.');
+        } catch {
+          // Fotos wurden immerhin schon geteilt - kein harter Fehler nötig.
         }
       }
       return;
